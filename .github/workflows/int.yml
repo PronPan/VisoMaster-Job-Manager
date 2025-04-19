@@ -1,30 +1,54 @@
-name: int
-on: push
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Setup JFrog CLI
-        uses: jfrog/setup-jfrog-cli@v4
-        env:
-          JF_URL: ${{ vars.JF_URL }}
-          JF_ACCESS_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
-      - name: Set CLI Config
-        run: jf pip-config --global=true --repo-resolve=axel-pypi
-      - name: Install Deps
-        run: jf pip install .
-      - name: Package the project
-        run: python setup.py sdist bdist_wheel
-      - name: Publish Artifacts
-        run: jf rt upload dist/ axel-pypi/
-      - name: Publish Build info With JFrog CLI
-        run: |
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+# JFrog SAST performs 1st party source code security analysis
+# For more information, see
+# https://docs.jfrog-applications.jfrog.io/jfrog-security-features/sast
 
-          # Collect environment variables for the build
-          jf rt build-collect-env # Add build_name build_number if needed
-          # Collect VCS details from git and add them to the build
-          jf rt build-add-git # Add build_name build_number if needed
-          # Publish build info
-          jf rt build-publish # Add build_name build_number if needed
+name: "JFrog SAST Scan"
+
+on:
+  push:
+    branches: [ "dev" ]
+  pull_request:
+    branches: [ "dev" ]
+  schedule:
+    - cron: '40 14 * * 6'
+
+env:
+  # [Mandatory]
+  # JFrog platform URL and access token for
+  # a JFrog platform instance with active
+  # JFrog Advanced Security subscription
+  JF_URL: ${{ secrets.JF_URL }}
+  JF_TOKEN: ${{ secrets.JF_ACCESS_TOKEN }}
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+
+    - name: Install and configure JFrog CLI
+      run: |
+        npm install -g jfrog-cli-v2-jf
+        echo $JF_TOKEN | jf c add --interactive=false --url=$JF_URL --access-token-stdin
+
+    - name: Run JFrog SAST
+      run: |
+        jf audit --sast --format=sarif > jfrog_sast.sarif
+
+
+    - name: Upload output to generate autofix
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: jfrog_sast.sarif
